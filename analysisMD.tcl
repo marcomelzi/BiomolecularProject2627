@@ -137,6 +137,7 @@ for {set i 0} {$i < $nf} {incr i $step} {
 close $out
 }
 
+source nativecontacts.tcl
 exit
 
 

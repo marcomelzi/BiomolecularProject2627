@@ -1,3 +1,5 @@
+package require nativecontacts
+
 ## The atom selection
  set protein [ atomselect top "protein and name CA"]
  
