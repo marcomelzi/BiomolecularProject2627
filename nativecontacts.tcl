@@ -6,7 +6,7 @@
  set ref [ prepareNativeContacts 7 $protein]
  
 ## Output file
-set out [open ./q_value/contacts.txt w] 
+set out [open ./q_value.txt w] 
 
  ## Get the number of native contacts (for computing their fraction)
  set nnc [ llength $ref]
