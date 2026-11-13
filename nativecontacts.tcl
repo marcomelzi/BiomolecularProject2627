@@ -1,30 +1,43 @@
-package require nativecontacts
+# q-value senza il plugin nativecontacts (solo comandi core di VMD)
+set cutoff 7.0
+set minsep 3        ;# scarta le coppie con |resid_i - resid_j| < 3
 
-## The atom selection
- set protein [ atomselect top "protein and name CA"]
- 
- ## Use first trajectory frame as a reference
- $protein frame 0
- set ref [ prepareNativeContacts 7 $protein]
- 
-## Output file
-set out [open ./q_value.txt w] 
+set protein [atomselect top "protein and name CA"]
 
- ## Get the number of native contacts (for computing their fraction)
- set nnc [ llength $ref]
- puts "There are $nnc contacts in the native state"
- puts $out "There are $nnc contacts in the native state"
+# mappa atom index -> resid, costruita una volta sola
+foreach i [$protein get index] r [$protein get resid] { set resid($i) $r }
 
-               # Now, for each frame,
- forFrames fno $protein {
-               # compute number of native contacts,
-         set nc [measureNativeContacts $ref 7 $protein]  
-               # their fraction,
-         set qnc [ expr 100.0 * $nc / $nnc ]
-               # and print both.
-         puts [ format "Frame %d: %f, %.3f%%" $fno $nc $qnc ]
-	 puts $out [ format "Frame %d: %f, %.3f%%" $fno $nc $qnc ]
- }
+proc contactSet {sel cutoff minsep} {
+    global resid
+    set c [measure contacts $cutoff $sel]
+    set out {}
+    foreach i [lindex $c 0] j [lindex $c 1] {
+        if {abs($resid($i) - $resid($j)) < $minsep} continue
+        if {$i < $j} { lappend out "$i $j" } else { lappend out "$j $i" }
+    }
+    return [lsort -unique $out]
+}
 
+set nf [molinfo top get numframes]
+
+## Use first trajectory frame as a reference
+$protein frame 0
+set ref [contactSet $protein $cutoff $minsep]
+set nnc [llength $ref]
+foreach p $ref { set isnative($p) 1 }
+
+set out [open ./q_value.txt w]
+puts "There are $nnc contacts in the native state"
+puts $out "There are $nnc contacts in the native state"
+
+for {set f 0} {$f < $nf} {incr f} {
+    $protein frame $f
+    set nc 0
+    foreach p [contactSet $protein $cutoff $minsep] {
+        if {[info exists isnative($p)]} { incr nc }
+    }
+    set qnc [expr {100.0 * $nc / $nnc}]
+    puts       [format "Frame %d: %d, %.3f%%" $f $nc $qnc]
+    puts $out  [format "Frame %d: %d, %.3f%%" $f $nc $qnc]
+}
 close $out
-
