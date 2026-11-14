@@ -12,7 +12,7 @@ CONF = "sample.conf"
 INPUTS = ["ionized.psf", "ionized.pdb", "par_all27_prot_lipid.inp", "analysisMD.tcl", "nativecontacts.tcl"] #file ricopiati nelle cartellette
 OUTDIR = WORK / "temperature_replicas"
 NRUNS = os.cpu_count()
-STEPS = 100000          # come il 'run' nel conf: serve solo per la percentuale
+STEPS = 500000          # come il 'run' nel conf: serve solo per la percentuale
 VMD = "/Applications/VMD2b1.app/Contents/MacOS/startup.command"
 
 def prepara(i):
@@ -22,7 +22,7 @@ def prepara(i):
     for name in INPUTS:
         if not (d / name).exists():
             os.symlink(WORK / name, d / name)
-    (d / "run.conf").write_text((WORK / CONF).read_text().replace("set temperature   310", f"set temperature {330 + 20*i}"))
+    (d / "run.conf").write_text((WORK / CONF).read_text().replace("set temperature   310", f"set temperature {370 + 20*i}"))
     # qui setto la temperatura, in particolare: scrive un file nuovo, replicas/run01/run.conf, 
     # il cui contenuto è la riga del seed seguita da tutta la copia del conf originale:
     return d
