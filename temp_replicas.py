@@ -22,7 +22,7 @@ def prepara(i):
     for name in INPUTS:
         if not (d / name).exists():
             os.symlink(WORK / name, d / name)
-    (d / "run.conf").write_text((WORK / CONF).read_text().replace("set temperature   310", f"set temperature {330 + i}"))
+    (d / "run.conf").write_text((WORK / CONF).read_text().replace("set temperature   310", f"set temperature {330 + 20*i}"))
     # qui setto la temperatura, in particolare: scrive un file nuovo, replicas/run01/run.conf, 
     # il cui contenuto è la riga del seed seguita da tutta la copia del conf originale:
     return d
