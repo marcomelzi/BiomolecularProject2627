@@ -1,6 +1,7 @@
 # to run it, just type:
 # python3 namd_replicas.py
-"""Lancia N repliche NAMD identiche tranne il seed, una per core, in sottocartelle separate."""
+"""Lancia 4 repliche NAMD identiche tranne il seed in sottocartelle separate,
+ sfrutta tutti i processori disponibili"""
 
 import os
 import subprocess
@@ -9,11 +10,13 @@ from pathlib import Path
 
 WORK = Path("/Users/User/Desktop/BiomolecularProject2627")
 CONF = "sample.conf"
-INPUTS = ["ionized.psf", "ionized.pdb", "par_all27_prot_lipid.inp"]
+INPUTS = ["ionized.psf", "ionized.pdb", "par_all27_prot_lipid.inp", "analysisMD.tcl", "nativecontacts.tcl"]
 OUTDIR = WORK / "replicas"
-NRUNS = os.cpu_count()
-STEPS = 20000          # come il 'run' nel conf: serve solo per la percentuale
-
+NRUNS = 4
+NCPUS = os.cpu_count()
+CPUPERRUN = int(NCPUS/NRUNS)
+STEPS = 500000          # come il 'run' nel conf: serve solo per la percentuale
+VMD = "/Applications/VMD2b1.app/Contents/MacOS/startup.command"
 
 def prepara(i):
     #costruire una cartella, restituisce il percorso ad essa assoociato
@@ -22,7 +25,8 @@ def prepara(i):
     for name in INPUTS:
         if not (d / name).exists():
             os.symlink(WORK / name, d / name)
-    (d / "run.conf").write_text(f"seed {1000 + i}\n" + (WORK / CONF).read_text()) 
+    testo = (WORK / CONF).read_text().replace("set temperature   310", "set temperature 510")
+    (d / "run.conf").write_text(f"seed {1000 + i}\n" + testo)
     # qui setto il seed, in particolare: scrive un file nuovo, replicas/run01/run.conf, 
     # il cui contenuto è la riga del seed seguita da tutta la copia del conf originale:
     return d
@@ -46,11 +50,11 @@ def passo(log):     #necessario solo per i print
 # CODE TO ESECUTE
 runs = [prepara(i) for i in range(NRUNS)]
 # print(runs) stampa un vettore di percorsi, che possiamo pensare come un vettore di stringhe, del tipo:
-# [PosixPath('/Users/User/Desktop/BiomolecularProject2627/replicas/run00'),  ... , PosixPath('.../run07')]
+# [PosixPath('/Users/User/Desktop/BiomolecularProject2627/replicas/run00'),  ... , PosixPath('.../run03')]
 
 # ogni replica su un core: NAMD con +p1, il sistema le distribuisce sui core liberi
 proc = [subprocess.Popen(
-            ["namd3", "+p1", "run.conf"],          #input che ogni core sta dando
+            ["bash", "-c", f"namd3 +p{CPUPERRUN} run.conf && {VMD} -dispdev text -e analysisMD.tcl"],          #input che ogni core sta dando
             cwd=d,                                 #working directory di ogni core
             stdout=open(d / "run.log", "w"),       #output file di ogni core
             stderr=subprocess.STDOUT)              #all'atto pratico printa nello stdout 
