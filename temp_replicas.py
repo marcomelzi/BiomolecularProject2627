@@ -1,6 +1,6 @@
 # to run it, just type:
 # python3 temp_replicas.py
-"""Lancia N repliche NAMD identiche tranne il seed, una per core, in sottocartelle separate."""
+"""Lancia N repliche NAMD identiche tranne la temperatura, una per core, in sottocartelle separate."""
 
 import os
 import subprocess
