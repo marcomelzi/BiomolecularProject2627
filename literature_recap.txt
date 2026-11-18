@@ -1,0 +1,22 @@
+hydrophobi residues: Phe-6, Ala-10, Leu-13,
+Trp-14, Ile-17, Leu-21, Ile-30, Leu-39, Ile-41, Phe-43, Ile-49,
+Ile-51, Val-60, Leu-62, Phe-71, Trp-78, Phe-87, Leu-90, Leu-
+91, Ala-94, Ala-95, Val-103, and Phe-105.
+17 invariant residues: Ala-10 (a1),
+Asp-31 (b1), Gly-37, Val-38 (b2), Thr-40 (b2), Ile-51 (b3),
+Asn-52 (b3), Gln-54 (b3), Pro-56 (310), Gln-59 (b4), Trp-61 (b4),
+Leu-62 (b4), Gly-67, Asp-72 (b5), Trp-78 (b6), Gly-84, and
+Leu-91 (a2).
+Mutations kinda: Ile-17, Asp-29, Gly-37, Val-60,
+Leu-62, His-70, Trp-78, Phe-87, and Trp-88
+
+
+La cosa che salta all’occhio è dove i due pannelli non sono in accordo.
+
+Nelle zone 25-29, 36-37 e 65-66 i due segnali vanno insieme: q basso e RMSF alto, loop esposti che si muovono. Ma guarda le barre grigie: sono quasi tutte lì. Quei crolli spettacolari (G26 al 19%, S28 al 21%) riguardano residui con uno o due contatti nativi, dove perderne uno significa dimezzare la percentuale. È rumore, non struttura che cede.
+
+La banda 59-74 è il contrario, ed è il punto importante. Lì le barre sono arancioni e affidabili — residui con 4-7 contatti ciascuno — mentre l’RMSF sotto resta basso, fra 1.0 e 1.4 Å, più basso che in gran parte della proteina. È una regione impacchettata che perde contatti senza agitarsi: esattamente ciò che l’RMSF da solo non può segnalare, e il motivo per cui un’analisi basata solo su quello ti avrebbe mandato sui loop sbagliati.
+
+Il tratto 85-97 è l’opposto speculare: q quasi ovunque sopra il 96% e l’RMSF più basso di tutta la proteina. È il nucleo che tiene, e non ha senso toccarlo.
+
+Il C-terminale 98-104 mostra un profilo intermedio, con q attorno al 70% su Q98 ed E101 e l’RMSF che risale gradualmente verso la coda — coerente con una regione che fa contatti reali ma deboli, quella che la letteratura indica valere 14 °C di Tm.
