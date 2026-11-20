@@ -65,7 +65,7 @@ INPUT_LINKS = [PAR, "analysisMD.tcl", "nativecontacts.tcl", "nativecontacts_spli
 # PUNTO DI AGGANCIO per l'analisi per residuo (da definire con lo script del compagno):
 # elenca qui gli script .tcl (presenti in WORK) da lanciare con VMD dopo run_split.tcl.
 # Vengono linkati nelle cartelle runNN e lanciati in ordine.
-EXTRA_TCL = []          # es. ["q_perres.tcl"]
+EXTRA_TCL = ["q_value_per_residue.tcl"]          # es. ["q_perres.tcl"]
 # ---------------------------------------------------------------------------
  
 AA3TO1 = {
@@ -82,7 +82,7 @@ RUN_SPLIT_TCL = (
     "source nativecontacts_split.tcl\n"
     "exit\n"
 )
-OUTPUT_ATTESI = ["rmsd.dat", "rmsfCA.dat", "q_value.txt", "q_split.txt"]
+OUTPUT_ATTESI = ["rmsd.dat", "rmsfCA.dat", "q_value.txt", "q_split.txt", "q_per_residue.txt"]
  
  
 class PipelineError(Exception):

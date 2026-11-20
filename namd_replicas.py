@@ -8,15 +8,15 @@ import subprocess
 import time
 from pathlib import Path
 
-WORK = Path("/Users/User/Desktop/BiomolecularProject2627")
+WORK = Path("/home/marco/BiomolecularProject2627")
 CONF = "sample.conf"
-INPUTS = ["ionized.psf", "ionized.pdb", "par_all27_prot_lipid.inp", "analysisMD.tcl", "nativecontacts.tcl"]
+INPUTS = ["ionized.psf", "ionized.pdb", "par_all27_prot_lipid.inp", "analysisMD.tcl", "nativecontacts.tcl", "q_value_per_residue.tcl"] #add per residue q
 OUTDIR = WORK / "replicas"
-NRUNS = 4
+NRUNS = 5
 NCPUS = os.cpu_count()
 CPUPERRUN = int(NCPUS/NRUNS)
 STEPS = 500000          # come il 'run' nel conf: serve solo per la percentuale
-VMD = "/Applications/VMD2b1.app/Contents/MacOS/startup.command"
+VMD = "vmd"
 
 def prepara(i):
     #costruire una cartella, restituisce il percorso ad essa assoociato
@@ -54,7 +54,7 @@ runs = [prepara(i) for i in range(NRUNS)]
 
 # ogni replica su un core: NAMD con +p1, il sistema le distribuisce sui core liberi
 proc = [subprocess.Popen(
-            ["bash", "-c", f"namd3 +p{CPUPERRUN} run.conf && {VMD} -dispdev text -e analysisMD.tcl"],          #input che ogni core sta dando
+            ["bash", "-c", f"namd3 +p{CPUPERRUN} run.conf && {VMD} -dispdev text -e analysisMD.tcl && {VMD} -dispdev text -e q_value_per_residue.tcl"],          #input che ogni core sta dando
             cwd=d,                                 #working directory di ogni core
             stdout=open(d / "run.log", "w"),       #output file di ogni core
             stderr=subprocess.STDOUT)              #all'atto pratico printa nello stdout 
