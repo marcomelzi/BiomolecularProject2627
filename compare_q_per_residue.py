@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Confronta il Q per residuo dei mutanti con quello del wild type (WT).
- 
+
 Uso (dalla cartella del progetto):
     python3 compare_q_per_residue.py                # tutte le mutazioni con dati completi
     python3 compare_q_per_residue.py AA95M NA52M    # solo queste
     python3 compare_q_per_residue.py --alpha 0.1
- 
+    python3 compare_q_per_residue.py --wt-dir replicas    # forza il WT originale
+
 Dati letti:
-    WT       replicas/run*/q_per_residue.txt
     mutante  mutations/<SIGLA>/replicas/run*/q_per_residue.txt
- 
+    WT       di default il CONTROLLO mutations/WT/replicas/run*/ (stessa pipeline dei
+             mutanti, lanciato con "namd_mutations.py WT"); se non esiste, il WT
+             originale replicas/run*/ (con un avviso). Con --wt-dir si sceglie a mano.
+
 Output in mutations/evaluations/:
-    <SIGLA>_vs_WT.txt              report leggibile con il verdetto
-    <SIGLA>_vs_WT_per_residue.tsv  tabella per residuo (WT vs mutante)
-    summary.tsv                    una riga per mutazione (aggiornato a ogni lancio)
- 
+    <SIGLA>_vs_WTcontrollo.txt     report leggibile con il verdetto (WT = controllo)
+    <SIGLA>_vs_WT.txt              idem se il WT e' quello originale
+    <SIGLA>_vs_*_per_residue.tsv   tabella per residuo (WT vs mutante)
+    summary.tsv                    una riga per (mutazione, WT usato), aggiornato a ogni lancio
+
 Come si decide il verdetto (stabilizzante / destabilizzante / nessun effetto):
   - Per ogni replica si calcola UN Q globale: media dei q_res pesata sui n_nativi
     (equivale al Q globale medio sulla finestra di frame).
@@ -25,7 +29,7 @@ Come si decide il verdetto (stabilizzante / destabilizzante / nessun effetto):
     la tabella per residuo e' solo descrittiva (si segna dove la differenza supera
     2 errori standard).
 """
- 
+
 import argparse
 import itertools
 import math
@@ -34,7 +38,7 @@ import re
 import statistics
 import sys
 from pathlib import Path
- 
+
 WORK = Path(__file__).resolve().parent
 WT_REPLICAS = WORK / "replicas"
 MUT_ROOT = WORK / "mutations"
@@ -45,12 +49,12 @@ ALPHA = 0.05
 INTORNO = 5                 # residui da ciascun lato del sito mutato per la media locale
 MAX_PERM_ESATTE = 200000    # oltre, permutazioni casuali (seed fisso)
 SIGLA_RE = re.compile(r"[A-Z][A-Z]\d+[A-Z]")
- 
- 
+
+
 class ConfrontoError(Exception):
     pass
- 
- 
+
+
 # ------------------------------- lettura ---------------------------------
 def leggi_q(path):
     finestra, res = None, {}
@@ -67,16 +71,16 @@ def leggi_q(path):
     if not res:
         raise ConfrontoError(f"{path}: nessun dato letto")
     return {"finestra": finestra, "res": res}
- 
- 
+
+
 def raccogli(cartella_replicas):
     runs = []
     for d in sorted(Path(cartella_replicas).glob("run*")):
         if (d / FILE_Q).exists():
             runs.append((d.name, leggi_q(d / FILE_Q)))
     return runs
- 
- 
+
+
 def carica_tag():
     tags = {}
     if MUTATIONS_TXT.exists():
@@ -85,23 +89,23 @@ def carica_tag():
             if p and not p[0].startswith("#"):
                 tags[p[0].upper()] = p[1] if len(p) > 1 else ""
     return tags
- 
- 
+
+
 # ------------------------------- statistica -------------------------------
 def media(x):
     return sum(x) / len(x) if x else math.nan
- 
- 
+
+
 def sem(x):
     return statistics.stdev(x) / math.sqrt(len(x)) if len(x) > 1 else math.nan
- 
- 
+
+
 def q_globale(dati):
     """Media dei q_res pesata sui n_nativi (= Q globale medio sulla finestra)."""
     v = [(n, q) for _, n, q in dati["res"].values() if q is not None and n > 0]
     return sum(n * q for n, q in v) / sum(n for n, _ in v)
- 
- 
+
+
 def test_permutazione(a, b):
     """p-value a due code per la differenza media(b) - media(a)."""
     tutti, na, nb = list(a) + list(b), len(a), len(b)
@@ -123,10 +127,10 @@ def test_permutazione(a, b):
         if abs(media(tutti[na:]) - media(tutti[:na])) >= obs - 1e-12:
             conta += 1
     return (conta + 1) / (n_perm + 1), "Monte Carlo", n_perm
- 
- 
+
+
 # ------------------------------- confronto -------------------------------
-def confronta(sigla, wt_runs, mut_runs, tag, alpha):
+def confronta(sigla, wt_runs, mut_runs, tag, alpha, wt_tipo, wt_label):
     if len(wt_runs) < 2 or len(mut_runs) < 2:
         raise ConfrontoError(f"servono almeno 2 repliche per gruppo (WT: {len(wt_runs)}, "
                              f"{sigla}: {len(mut_runs)})")
@@ -135,14 +139,14 @@ def confronta(sigla, wt_runs, mut_runs, tag, alpha):
         raise ConfrontoError(f"finestre di frame diverse tra le repliche: {sorted(map(str, finestre))}. "
                              f"Rilancia q_value_per_residue.tcl con la stessa finestra ovunque")
     finestra = finestre.pop()
- 
+
     tutte = [set(d["res"]) for _, d in wt_runs + mut_runs]
     resids = sorted(set.intersection(*tutte))
     avviso_res = None
     if len(resids) != len(set.union(*tutte)):
         avviso_res = (f"i residui non coincidono tra tutte le repliche: uso i {len(resids)} "
                       f"in comune su {len(set.union(*tutte))}")
- 
+
     # --- verdetto globale
     gw = [q_globale(d) for _, d in wt_runs]
     gm = [q_globale(d) for _, d in mut_runs]
@@ -152,7 +156,7 @@ def confronta(sigla, wt_runs, mut_runs, tag, alpha):
         esito = "STABILIZZANTE" if delta > 0 else "DESTABILIZZANTE"
     else:
         esito = "NESSUN EFFETTO SIGNIFICATIVO"
- 
+
     # --- dettaglio per residuo
     pos = int(re.search(r"\d+", sigla).group())
     righe = []
@@ -169,17 +173,18 @@ def confronta(sigla, wt_runs, mut_runs, tag, alpha):
         righe.append({"resid": r, "resname": wt_runs[0][1]["res"][r][0], "sito": r == pos,
                       "n_wt": nw, "n_mut": nm, "q_wt": media(qw), "sem_wt": sem(qw),
                       "q_mut": media(qm), "sem_mut": sem(qm), "delta": d_r, "flag": flag})
-    return {"sigla": sigla, "tag": tag, "finestra": finestra, "avviso_res": avviso_res,
+    return {"wt_tipo": wt_tipo, "wt_label": wt_label,
+            "sigla": sigla, "tag": tag, "finestra": finestra, "avviso_res": avviso_res,
             "gw": gw, "gm": gm, "delta": delta, "p": p, "metodo": metodo, "n_perm": n_perm,
             "alpha": alpha, "esito": esito, "righe": righe, "pos": pos,
             "wt_run_names": [n for n, _ in wt_runs], "mut_run_names": [n for n, _ in mut_runs]}
- 
- 
+
+
 # ------------------------------- output -------------------------------
 def f(x, nd=2):
     return "nan" if x is None or (isinstance(x, float) and math.isnan(x)) else f"{x:.{nd}f}"
- 
- 
+
+
 def testo_report(c):
     gw, gm = c["gw"], c["gm"]
     righe = c["righe"]
@@ -189,11 +194,12 @@ def testo_report(c):
     sito = next((r for r in righe if r["sito"]), None)
     loc = [r for r in validi if abs(r["resid"] - c["pos"]) <= INTORNO and not r["sito"]]
     top = sorted([r for r in validi if r["flag"]], key=lambda r: -abs(r["delta"]))[:8]
- 
+
     L = []
-    L.append(f"CONFRONTO Q PER RESIDUO: {c['sigla']} vs WT"
+    L.append(f"CONFRONTO Q PER RESIDUO: {c['sigla']} vs WT ({c['wt_tipo']})"
              + (f"   (tag mutations.txt: {c['tag']})" if c["tag"] else ""))
     L.append("=" * 72)
+    L.append(f"WT di riferimento : {c['wt_label']}")
     L.append(f"Finestra di frame : {c['finestra']}")
     L.append(f"Repliche          : WT {len(gw)} ({', '.join(c['wt_run_names'])}) | "
              f"{c['sigla']} {len(gm)} ({', '.join(c['mut_run_names'])})")
@@ -242,15 +248,23 @@ def testo_report(c):
              "conserva la propria")
     L.append("    struttura iniziale. L'insieme dei contatti nativi del mutante puo' differire da "
              "quello del WT.")
-    L.append("  - Il WT e' stato simulato con la cella periodica scritta a mano in sample.conf, "
-             "i mutanti con la")
-    L.append("    cella misurata sul sistema: differenza da dichiarare nel confronto.")
+    if c["wt_tipo"] == "controllo":
+        L.append("  - Il WT e' il controllo passato nella STESSA pipeline dei mutanti (struttura WT_ di "
+                 "FoldX, stessa")
+        L.append("    costruzione del sistema, cella misurata, conf, seed e analisi).")
+    else:
+        L.append("  - ATTENZIONE: WT originale. E' stato simulato con la cella scritta a mano in "
+                 "sample.conf e senza")
+        L.append("    passare da FoldX, mentre i mutanti usano la cella misurata e la pipeline FoldX: "
+                 "una differenza")
+        L.append("    sistematica di protocollo puo' spostare il Q di tutte le mutazioni nello stesso "
+                 "verso.")
     L.append("  - Q a 510 K su 1 ns e' un indicatore della resistenza al disordine termico, "
              "non una misura")
     L.append("    di stabilita' termodinamica (ddG). Con poche repliche la potenza del test e' limitata.")
     return "\n".join(L) + "\n"
- 
- 
+
+
 def scrivi_tsv(c, path):
     cols = ["resid", "resname", "sito_mutato", "n_nativi_wt", "n_nativi_mut", "q_wt", "sem_wt",
             "q_mut", "sem_mut", "delta", "flag"]
@@ -260,24 +274,29 @@ def scrivi_tsv(c, path):
             fh.write("\t".join([str(r["resid"]), r["resname"], "yes" if r["sito"] else "",
                                 f(r["n_wt"], 1), f(r["n_mut"], 1), f(r["q_wt"]), f(r["sem_wt"]),
                                 f(r["q_mut"]), f(r["sem_mut"]), f(r["delta"]), r["flag"]]) + "\n")
- 
- 
-SUMMARY_COLS = ["mutazione", "tag", "n_wt", "n_mut", "q_wt", "q_mut", "delta", "p_value",
+
+
+SUMMARY_COLS = ["mutazione", "wt", "tag", "n_wt", "n_mut", "q_wt", "q_mut", "delta", "p_value",
                 "esito", "res_up", "res_down"]
- 
- 
+
+
 def aggiorna_summary(risultati):
     path = EVAL_DIR / "summary.tsv"
     righe = {}
     if path.exists():
-        for r in path.read_text().splitlines()[1:]:
-            p = r.split("\t")
-            if p and p[0]:
-                righe[p[0]] = r
+        vecchie = path.read_text().splitlines()
+        if vecchie and vecchie[0].split("\t") == SUMMARY_COLS:
+            for r in vecchie[1:]:
+                p = r.split("\t")
+                if len(p) > 1:
+                    righe[(p[0], p[1])] = r
+        else:
+            print("ATTENZIONE: summary.tsv in formato precedente, rigenerato con i soli "
+                  "risultati di questo lancio", flush=True)
     for c in risultati:
         v = [r for r in c["righe"] if not math.isnan(r["delta"])]
-        righe[c["sigla"]] = "\t".join([
-            c["sigla"], c["tag"] or "-", str(len(c["gw"])), str(len(c["gm"])),
+        righe[(c["sigla"], c["wt_tipo"])] = "\t".join([
+            c["sigla"], c["wt_tipo"], c["tag"] or "-", str(len(c["gw"])), str(len(c["gm"])),
             f(media(c["gw"])), f(media(c["gm"])), f"{c['delta']:+.2f}", f"{c['p']:.4f}",
             c["esito"].replace(" ", "_"),
             str(sum(1 for r in v if r["flag"] == "UP")),
@@ -287,8 +306,8 @@ def aggiorna_summary(risultati):
         for k in sorted(righe):
             fh.write(righe[k] + "\n")
     return path
- 
- 
+
+
 # ------------------------------- main -------------------------------
 def trova_mutazioni():
     if not MUT_ROOT.is_dir():
@@ -296,19 +315,36 @@ def trova_mutazioni():
     return sorted(d.name for d in MUT_ROOT.iterdir()
                   if d.is_dir() and SIGLA_RE.fullmatch(d.name)
                   and any((d / "replicas").glob(f"run*/{FILE_Q}")))
- 
- 
+
+
 def main():
     ap = argparse.ArgumentParser(description="Confronto Q per residuo mutanti vs WT")
     ap.add_argument("mutazioni", nargs="*", help="sigle (default: tutte quelle con dati)")
+    ap.add_argument("--wt-dir", type=Path, default=None,
+                    help="cartella del WT da usare (con run*/ oppure con replicas/run*/); "
+                         "default: mutations/WT se esiste, altrimenti replicas/")
     ap.add_argument("--alpha", type=float, default=ALPHA, help=f"soglia p-value ({ALPHA})")
     args = ap.parse_args()
- 
+
     try:
-        wt_runs = raccogli(WT_REPLICAS)
+        if args.wt_dir:
+            wt_dir = args.wt_dir.resolve()
+            if (wt_dir / "replicas").is_dir():
+                wt_dir = wt_dir / "replicas"
+        elif raccogli(MUT_ROOT / "WT" / "replicas"):
+            wt_dir = MUT_ROOT / "WT" / "replicas"
+        else:
+            wt_dir = WT_REPLICAS
+            print("ATTENZIONE: controllo mutations/WT non trovato, uso il WT originale (replicas/). "
+                  "Lancia 'python3 namd_mutations.py WT' per il confronto a pari protocollo.",
+                  flush=True)
+        wt_tipo = "originale" if wt_dir.resolve() == WT_REPLICAS.resolve() else "controllo"
+        wt_label = f"{wt_tipo} ({wt_dir})"
+        print(f"WT di riferimento: {wt_label}", flush=True)
+        wt_runs = raccogli(wt_dir)
         if not wt_runs:
             raise ConfrontoError(
-                f"nessun {FILE_Q} in {WT_REPLICAS}/run*/. Calcolalo prima con "
+                f"nessun {FILE_Q} in {wt_dir}/run*/. Calcolalo prima con "
                 f"q_value_per_residue.tcl su ogni replica del WT")
         sigle = [s.upper() for s in args.mutazioni] or trova_mutazioni()
         if not sigle:
@@ -316,14 +352,14 @@ def main():
     except ConfrontoError as e:
         print(f"ERRORE: {e}", file=sys.stderr)
         return 1
- 
+
     tags = carica_tag()
     EVAL_DIR.mkdir(parents=True, exist_ok=True)
     risultati, problemi = [], []
-    n_run_wt = len(list(WT_REPLICAS.glob("run*")))
+    n_run_wt = len(list(wt_dir.glob("run*")))
     if len(wt_runs) < n_run_wt:
         print(f"ATTENZIONE: WT con {FILE_Q} in {len(wt_runs)} repliche su {n_run_wt}", flush=True)
- 
+
     for s in sigle:
         try:
             if not SIGLA_RE.fullmatch(s):
@@ -335,24 +371,24 @@ def main():
             n_run_mut = len(list(rep.glob("run*")))
             if len(mut_runs) < n_run_mut:
                 print(f"ATTENZIONE [{s}]: {FILE_Q} in {len(mut_runs)} repliche su {n_run_mut}", flush=True)
-            c = confronta(s, wt_runs, mut_runs, tags.get(s), args.alpha)
+            c = confronta(s, wt_runs, mut_runs, tags.get(s), args.alpha, wt_tipo, wt_label)
         except ConfrontoError as e:
             print(f"[{s}] saltata: {e}", file=sys.stderr)
             problemi.append(s)
             continue
         rep_txt = testo_report(c)
-        (EVAL_DIR / f"{s}_vs_WT.txt").write_text(rep_txt)
-        scrivi_tsv(c, EVAL_DIR / f"{s}_vs_WT_per_residue.tsv")
+        suffisso = "WTcontrollo" if wt_tipo == "controllo" else "WT"
+        (EVAL_DIR / f"{s}_vs_{suffisso}.txt").write_text(rep_txt)
+        scrivi_tsv(c, EVAL_DIR / f"{s}_vs_{suffisso}_per_residue.tsv")
         risultati.append(c)
         print(f"[{s}] Q globale WT {f(media(c['gw']))} -> {f(media(c['gm']))} "
               f"(delta {c['delta']:+.2f}, p = {c['p']:.4f})  ESITO: {c['esito']}", flush=True)
- 
+
     if risultati:
         sp = aggiorna_summary(risultati)
         print(f"\nOutput in {EVAL_DIR}/  (report per mutazione, tabelle per residuo, {sp.name})")
     return 0 if not problemi else 2
- 
- 
+
+
 if __name__ == "__main__":
     sys.exit(main())
- 
