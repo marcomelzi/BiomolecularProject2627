@@ -5,6 +5,7 @@
 Uso (dalla cartella del progetto):
     python3 compare_q_per_residue.py                # tutte le mutazioni con dati completi
     python3 compare_q_per_residue.py AA95M NA52M    # solo queste
+    python3 compare_q_per_residue.py AA95M+NA52M    # una doppia mutazione (cartella AA95M_NA52M)
     python3 compare_q_per_residue.py --alpha 0.1
     python3 compare_q_per_residue.py --wt-dir replicas    # forza il WT originale
 
@@ -48,7 +49,8 @@ FILE_Q = "q_per_residue.txt"
 ALPHA = 0.05
 INTORNO = 5                 # residui da ciascun lato del sito mutato per la media locale
 MAX_PERM_ESATTE = 200000    # oltre, permutazioni casuali (seed fisso)
-SIGLA_RE = re.compile(r"[A-Z][A-Z]\d+[A-Z]")
+SINGOLA_RE = re.compile(r"([A-Z])([A-Z])(\d+)([A-Z])")
+SIGLA_RE = re.compile(r"[A-Z][A-Z]\d+[A-Z](?:_[A-Z][A-Z]\d+[A-Z])*")   # singola o combinazione
 
 
 class ConfrontoError(Exception):
@@ -79,6 +81,22 @@ def raccogli(cartella_replicas):
         if (d / FILE_Q).exists():
             runs.append((d.name, leggi_q(d / FILE_Q)))
     return runs
+
+
+def normalizza_sigla(s):
+    """'na52m+AA95M' -> 'AA95M_NA52M' (ordine di posizione, come le cartelle di namd_mutations.py).
+    Se non e' una sigla valida restituisce il testo maiuscolo, che verra' scartato dopo."""
+    parti = [p for p in re.split(r"[+,_]", s.strip().upper()) if p]
+    ms = [SINGOLA_RE.fullmatch(p) for p in parti]
+    if not parti or not all(ms):
+        return s.strip().upper()
+    ms.sort(key=lambda m: (m.group(2), int(m.group(3))))
+    return "_".join(m.group(0) for m in ms)
+
+
+def tag_di(sigla, tags):
+    t = [tags.get(x, "-") for x in sigla.split("_")]
+    return "+".join(t) if any(x != "-" for x in t) else None
 
 
 def carica_tag():
@@ -158,7 +176,7 @@ def confronta(sigla, wt_runs, mut_runs, tag, alpha, wt_tipo, wt_label):
         esito = "NESSUN EFFETTO SIGNIFICATIVO"
 
     # --- dettaglio per residuo
-    pos = int(re.search(r"\d+", sigla).group())
+    posizioni = [int(x) for x in re.findall(r"[A-Z]{2}(\d+)[A-Z]", sigla)]
     righe = []
     for r in resids:
         qw = [d["res"][r][2] for _, d in wt_runs if d["res"][r][2] is not None]
@@ -170,13 +188,13 @@ def confronta(sigla, wt_runs, mut_runs, tag, alpha, wt_tipo, wt_label):
         flag = ""
         if not math.isnan(d_r) and not math.isnan(se) and abs(d_r) > 2 * se and abs(d_r) > 0:
             flag = "UP" if d_r > 0 else "DOWN"
-        righe.append({"resid": r, "resname": wt_runs[0][1]["res"][r][0], "sito": r == pos,
+        righe.append({"resid": r, "resname": wt_runs[0][1]["res"][r][0], "sito": r in posizioni,
                       "n_wt": nw, "n_mut": nm, "q_wt": media(qw), "sem_wt": sem(qw),
                       "q_mut": media(qm), "sem_mut": sem(qm), "delta": d_r, "flag": flag})
     return {"wt_tipo": wt_tipo, "wt_label": wt_label,
             "sigla": sigla, "tag": tag, "finestra": finestra, "avviso_res": avviso_res,
             "gw": gw, "gm": gm, "delta": delta, "p": p, "metodo": metodo, "n_perm": n_perm,
-            "alpha": alpha, "esito": esito, "righe": righe, "pos": pos,
+            "alpha": alpha, "esito": esito, "righe": righe, "posizioni": posizioni,
             "wt_run_names": [n for n, _ in wt_runs], "mut_run_names": [n for n, _ in mut_runs]}
 
 
@@ -191,8 +209,9 @@ def testo_report(c):
     validi = [r for r in righe if not math.isnan(r["delta"])]
     su = [r for r in validi if r["flag"] == "UP"]
     giu = [r for r in validi if r["flag"] == "DOWN"]
-    sito = next((r for r in righe if r["sito"]), None)
-    loc = [r for r in validi if abs(r["resid"] - c["pos"]) <= INTORNO and not r["sito"]]
+    siti = [r for r in righe if r["sito"]]
+    loc = [r for r in validi if not r["sito"]
+           and any(abs(r["resid"] - q) <= INTORNO for q in c["posizioni"])]
     top = sorted([r for r in validi if r["flag"]], key=lambda r: -abs(r["delta"]))[:8]
 
     L = []
@@ -230,12 +249,13 @@ def testo_report(c):
     L.append("Dettaglio per residuo (descrittivo, nessuna correzione per test multipli)")
     L.append(f"  Residui con Q piu' alto del WT di oltre 2 errori standard : {len(su)}")
     L.append(f"  Residui con Q piu' basso del WT di oltre 2 errori standard: {len(giu)}")
-    if sito and not math.isnan(sito["delta"]):
-        L.append(f"  Sito mutato ({sito['resname']}{sito['resid']}): Q WT {f(sito['q_wt'])} -> "
-                 f"{f(sito['q_mut'])}  (delta {sito['delta']:+.2f}; contatti nativi "
-                 f"{f(sito['n_wt'], 1)} -> {f(sito['n_mut'], 1)})")
+    for sito in siti:
+        if not math.isnan(sito["delta"]):
+            L.append(f"  Sito mutato ({sito['resname']}{sito['resid']}): Q WT {f(sito['q_wt'])} -> "
+                     f"{f(sito['q_mut'])}  (delta {sito['delta']:+.2f}; contatti nativi "
+                     f"{f(sito['n_wt'], 1)} -> {f(sito['n_mut'], 1)})")
     if loc:
-        L.append(f"  Intorno +-{INTORNO} residui (sito escluso): delta medio "
+        L.append(f"  Intorno +-{INTORNO} residui dai siti (siti esclusi): delta medio "
                  f"{media([r['delta'] for r in loc]):+.2f}")
     if top:
         L.append("  Residui con differenza maggiore (flag):")
@@ -346,7 +366,7 @@ def main():
             raise ConfrontoError(
                 f"nessun {FILE_Q} in {wt_dir}/run*/. Calcolalo prima con "
                 f"q_value_per_residue.tcl su ogni replica del WT")
-        sigle = [s.upper() for s in args.mutazioni] or trova_mutazioni()
+        sigle = [normalizza_sigla(s) for s in args.mutazioni] or trova_mutazioni()
         if not sigle:
             raise ConfrontoError(f"nessuna mutazione con {FILE_Q} in {MUT_ROOT}/<SIGLA>/replicas/run*/")
     except ConfrontoError as e:
@@ -363,7 +383,7 @@ def main():
     for s in sigle:
         try:
             if not SIGLA_RE.fullmatch(s):
-                raise ConfrontoError("formato sigla non valido (es. AA95M)")
+                raise ConfrontoError("formato sigla non valido (es. AA95M oppure AA95M+NA52M)")
             rep = MUT_ROOT / s / "replicas"
             mut_runs = raccogli(rep) if rep.is_dir() else []
             if not mut_runs:
@@ -371,7 +391,7 @@ def main():
             n_run_mut = len(list(rep.glob("run*")))
             if len(mut_runs) < n_run_mut:
                 print(f"ATTENZIONE [{s}]: {FILE_Q} in {len(mut_runs)} repliche su {n_run_mut}", flush=True)
-            c = confronta(s, wt_runs, mut_runs, tags.get(s), args.alpha, wt_tipo, wt_label)
+            c = confronta(s, wt_runs, mut_runs, tag_di(s, tags), args.alpha, wt_tipo, wt_label)
         except ConfrontoError as e:
             print(f"[{s}] saltata: {e}", file=sys.stderr)
             problemi.append(s)

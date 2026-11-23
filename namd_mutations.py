@@ -5,7 +5,15 @@
 Uso (dalla cartella del progetto, accanto a 1EW4.pdb e sample.conf):
     python3 namd_mutations.py AA95M NA52M
     python3 namd_mutations.py AA95M --build-only     # solo FoldX + costruzione sistema
+    python3 namd_mutations.py AA95M+NA52M            # DOPPIA mutazione, una sola simulazione
+    python3 namd_mutations.py AA95M+NA52M+DA25R      # tripla
+    python3 namd_mutations.py AA95M AA63F+NA52M      # una singola e una doppia (2 simulazioni)
     python3 namd_mutations.py WT                     # CONTROLLO WT con la stessa pipeline
+
+Argomenti separati = simulazioni separate. Sigle unite da + (o da virgola) = UNA sola
+simulazione con tutte quelle mutazioni insieme; la cartella si chiama con le sigle unite
+da _ in ordine di posizione (es. mutations/AA95M_NA52M/), quindi AA95M+NA52M e
+NA52M+AA95M sono la stessa combinazione.
 
 Il token WT lancia il wild type attraverso la STESSA pipeline dei mutanti: struttura
 WT_1EW4_1.pdb prodotta da FoldX (BuildModel) in una mutazione gia' costruita, stesso
@@ -110,6 +118,27 @@ def parse_sigla(s):
     return {"sigla": s, "wt": wt, "chain": chain, "pos": pos, "mut": mut}
 
 
+def parse_mutazione(token):
+    """'AA95M' -> singola; 'AA95M+NA52M' (anche con , o _) -> combinazione nella stessa MD."""
+    parti = re.split(r"[+,_]", token.strip())
+    if not token.strip() or any(not p.strip() for p in parti):
+        raise PipelineError(f"'{token}': separatore senza sigla (es. AA95M+NA52M)")
+    muts = [parse_sigla(p) for p in parti]
+    siti = [(x["chain"], x["pos"]) for x in muts]
+    if len(set(siti)) != len(siti):
+        raise PipelineError(f"'{token}': lo stesso residuo e' mutato piu' volte")
+    muts.sort(key=lambda x: (x["chain"], x["pos"]))
+    return {"sigla": "_".join(x["sigla"] for x in muts), "muts": muts}
+
+
+def tag_di(m, tags):
+    """Tag di mutations.txt: per una combinazione, i tag dei componenti uniti da +."""
+    if m.get("controllo"):
+        return None
+    t = [tags.get(x["sigla"], "-") for x in m["muts"]]
+    return "+".join(t) if any(x != "-" for x in t) else None
+
+
 def residui_pdb(pdb):
     """{(catena, numero): lettera} leggendo i CA dei record ATOM (prima altloc)."""
     res = {}
@@ -127,6 +156,11 @@ def residui_pdb(pdb):
 
 
 def valida(m, wt_res):
+    for x in m["muts"]:
+        valida_singola(x, wt_res)
+
+
+def valida_singola(m, wt_res):
     key = (m["chain"], m["pos"])
     if key not in wt_res:
         pos = sorted(p for c, p in wt_res if c == m["chain"])
@@ -175,7 +209,7 @@ def fase_foldx(m, mdir):
     mutante = trova()
     if mutante is None:
         shutil.copy(PDB_WT, d / PDB_WT.name)
-        (d / "individual_list.txt").write_text(f"{m['sigla']};\n")
+        (d / "individual_list.txt").write_text(",".join(x["sigla"] for x in m["muts"]) + ";\n")
         if FOLDX_MOLECULES.is_dir() and not (d / "molecules").exists():
             os.symlink(FOLDX_MOLECULES, d / "molecules")
         esegui([FOLDX, "--command=BuildModel", f"--pdb={PDB_WT.name}",
@@ -185,10 +219,12 @@ def fase_foldx(m, mdir):
             raise PipelineError(f"{m['sigla']}: FoldX non ha prodotto {PDB_WT.stem}_1.pdb "
                                 f"(vedi {d / 'foldx.log'})")
     # controllo che la mutazione sia davvero stata applicata
-    res = residui_pdb(mutante).get((m["chain"], m["pos"]))
-    if res != m["mut"]:
-        raise PipelineError(f"{m['sigla']}: in {mutante.name} il residuo {m['chain']}{m['pos']} "
-                            f"e' {res}, atteso {m['mut']}")
+    res_mut = residui_pdb(mutante)
+    for x in m["muts"]:
+        res = res_mut.get((x["chain"], x["pos"]))
+        if res != x["mut"]:
+            raise PipelineError(f"{m['sigla']}: in {mutante.name} il residuo {x['chain']}{x['pos']} "
+                                f"e' {res}, atteso {x['mut']}")
     return mutante
 
 
@@ -200,6 +236,10 @@ def fase_wt_controllo(mdir, wt_from):
     if (d / nome).exists():
         return d / nome
     if wt_from:
+        try:
+            wt_from = parse_mutazione(wt_from)["sigla"]
+        except PipelineError:
+            pass
         cand = [OUTROOT / wt_from / "foldx" / nome]
     else:
         cand = sorted(p for p in OUTROOT.glob(f"*/foldx/{nome}") if p.parent.parent.name != "WT")
@@ -260,8 +300,9 @@ def scrivi_info(m, mdir, sd, tag, nruns):
             f"cella periodica (da box.txt):\n{box}\n")
         return
     (mdir / "info.txt").write_text(
-        f"mutazione      : {m['sigla']}  ({m['wt']} -> {m['mut']}, catena {m['chain']}, "
-        f"residuo {m['pos']})\n"
+        f"mutazione      : {m['sigla']}  ("
+        + "; ".join(f"{x['wt']}{x['pos']}->{x['mut']} catena {x['chain']}" for x in m["muts"])
+        + f")  [{len(m['muts'])} mutazion{'e' if len(m['muts']) == 1 else 'i'} nella stessa MD]\n"
         f"tag mutations.txt: {tag if tag is not None else 'non presente'}\n"
         f"creato il      : {datetime.now():%Y-%m-%d %H:%M}\n"
         f"FoldX          : BuildModel diretto su {PDB_WT.name}, numberOfRuns=1\n"
@@ -377,7 +418,7 @@ def controlla_ambiente(build_only):
 
 def main():
     ap = argparse.ArgumentParser(description="Pipeline MD per mutanti puntiformi di 1EW4")
-    ap.add_argument("mutazioni", nargs="+", help="sigle FoldX (es. AA95M NA52M) e/o il token WT per il controllo")
+    ap.add_argument("mutazioni", nargs="+", help="sigle FoldX (es. AA95M NA52M); AA95M+NA52M = doppia mutazione in una sola MD; WT = controllo")
     ap.add_argument("--wt-from", default=None, metavar="SIGLA",
                     help="per il token WT: mutazione da cui prendere WT_1EW4_1.pdb (default: la prima trovata)")
     ap.add_argument("--nruns", type=int, default=NRUNS, help=f"repliche per mutazione ({NRUNS})")
@@ -401,14 +442,14 @@ def main():
             if s.strip().upper() == "WT":
                 m = {"sigla": "WT", "controllo": True}
             else:
-                m = parse_sigla(s)
+                m = parse_mutazione(s)
                 valida(m, wt_res)
             if m["sigla"] in viste:
                 raise PipelineError(f"{m['sigla']}: indicata piu' volte")
             viste.add(m["sigla"])
             muts.append(m)
         print("Mutazioni: " + ", ".join(
-            f"{m['sigla']} (tag {tags.get(m['sigla'], '-')})" for m in muts), flush=True)
+            f"{m['sigla']} (tag {tag_di(m, tags) or '-'})" for m in muts), flush=True)
 
         # 2) FoldX + sistema per tutte le mutazioni (fasi veloci)
         info = {}
@@ -422,7 +463,7 @@ def main():
                 mutante = fase_foldx(m, mdir)
             print(f"[{m['sigla']}] sistema: padding {PADDING} A, {CONC} M (saltato se gia' fatto)...", flush=True)
             sd = fase_sistema(m, mdir, mutante)
-            scrivi_info(m, mdir, sd, tags.get(m["sigla"]), args.nruns)
+            scrivi_info(m, mdir, sd, tag_di(m, tags), args.nruns)
             conf_mutante(sd)                       # fallisce subito se il conf non e' patchabile
             info[m["sigla"]] = (mdir, sd)
         print("Fasi di preparazione completate.", flush=True)
