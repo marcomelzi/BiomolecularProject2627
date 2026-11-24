@@ -1,9 +1,0 @@
-CA
-MG
-MN
-NA
-ZN
-FE
-CU
-CO
-K
